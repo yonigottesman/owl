@@ -15,7 +15,7 @@ struct OwlApp: App {
                 Button("Turn Off") { model.stop() }.disabled(model.busy)
             } else {
                 ForEach([3, 9, 0], id: \.self) { hours in
-                    Button(hours == 0 ? "∞ Indefinitely" : "\(hours) hours") { model.start(hours: hours) }.disabled(model.busy)
+                    Button(hours == 0 ? "∞" : "\(hours) hours") { model.start(hours: hours) }.disabled(model.busy)
                 }
             }
             Divider()
