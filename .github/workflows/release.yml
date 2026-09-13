@@ -1,0 +1,76 @@
+name: Build and release Owl
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: owl-release
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      build: ${{ steps.check.outputs.build }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version=$(python3 -c 'import plistlib; print(plistlib.load(open("Resources/Info.plist", "rb"))["CFBundleShortVersionString"])')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases" > "$RUNNER_TEMP/releases.json"
+          if jq -e --arg tag "v$version" 'any(.[]; .tag_name == $tag and .draft == false)' "$RUNNER_TEMP/releases.json" >/dev/null; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::v$version already released. Bump CFBundleShortVersionString to release again."
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    needs: gate
+    if: needs.gate.outputs.build == 'true'
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.gate.outputs.version }}
+      NOTARY_PROFILE: Owl-CI
+      NOTARY_KEYCHAIN: ${{ runner.temp }}/owl-notary.keychain-db
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test
+        run: ./scripts/test.sh
+      - name: Prepare signing and notarization
+        env:
+          OWL_SIGNING: ${{ secrets.OWL_SIGNING }}
+        run: python3 scripts/prepare-ci-signing.py
+      - name: Build, sign, notarize and staple
+        run: ./scripts/release.sh
+      - name: Publish download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp "dist/Owl-$VERSION-arm64.dmg" dist/Owl.dmg
+          shasum -a 256 dist/Owl.dmg | sed 's|dist/||' > dist/SHA256SUMS
+          gh release create "v$VERSION" dist/Owl.dmg dist/SHA256SUMS \
+            --target "$GITHUB_SHA" --title "Owl $VERSION" --latest \
+            --notes "Download Owl.dmg for Apple silicon Macs running macOS 13 or later. Drag Owl to Applications and open it. The first session asks for an administrator password to install the signed helper."
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          rm -rf apple_secrets
+          if [ -f "$NOTARY_KEYCHAIN" ]; then
+            security delete-keychain "$NOTARY_KEYCHAIN"
+          fi
