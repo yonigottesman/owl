@@ -2,7 +2,7 @@
 
 A tiny SwiftUI menu bar app that keeps your Mac awake, including with the lid closed.
 
-Click the owl. Pick **3 hours**, **Indefinitely**, or **9 hours**. The owl turns amber.
+Click the owl. Pick **3 hours**, **9 hours**, or **∞ Indefinitely**. The owl turns amber.
 Click **Turn Off** to restore normal sleep early. Timed sessions turn off automatically; Indefinitely runs until stopped, quit, or interrupted by the battery policy.
 While active, the menu shows the remaining time as **HH:MM left** above Turn Off.
 No Dock icon, settings window, accounts, dependencies, or network calls.
