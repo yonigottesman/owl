@@ -45,13 +45,14 @@ jobs:
     env:
       VERSION: ${{ needs.gate.outputs.version }}
       NOTARY_PROFILE: Owl-CI
-      NOTARY_KEYCHAIN: ${{ runner.temp }}/owl-notary.keychain-db
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - name: Test
         run: ./scripts/test.sh
+      - name: Set temporary keychain path
+        run: echo "NOTARY_KEYCHAIN=$RUNNER_TEMP/owl-notary.keychain-db" >> "$GITHUB_ENV"
       - name: Prepare signing and notarization
         env:
           OWL_SIGNING: ${{ secrets.OWL_SIGNING }}
