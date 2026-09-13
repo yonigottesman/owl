@@ -14,8 +14,8 @@ struct OwlApp: App {
                     .monospacedDigit()
                 Button("Turn Off") { model.stop() }.disabled(model.busy)
             } else {
-                ForEach([3, 6, 9], id: \.self) { hours in
-                    Button("\(hours) hours") { model.start(hours: hours) }.disabled(model.busy)
+                ForEach([3, 0, 9], id: \.self) { hours in
+                    Button(hours == 0 ? "Indefinitely" : "\(hours) hours") { model.start(hours: hours) }.disabled(model.busy)
                 }
             }
             Divider()
@@ -174,6 +174,8 @@ final class OwlModel: ObservableObject {
             let minutes = Int(ceil(min(9 * 3600, max(0, deadline - now)) / 60))
             let label = String(format: "%02d:%02d left", minutes / 60, minutes % 60)
             if remainingTime != label { remainingTime = label }
+        } else if status.active {
+            remainingTime = "Until turned off"
         } else if remainingTime != "00:00 left" {
             remainingTime = "00:00 left"
         }

@@ -2,7 +2,7 @@
 
 <h1 align="center">Owl</h1>
 
-A tiny macOS menu-bar app: pick 3, 6, or 9 hours to keep your Mac awake, with an optional battery mode.
+Keep your agents running and your Mac awake with the lid closed—even on battery.
 Unlike `caffeinate` alone, Owl uses a privileged helper to keep working with the lid closed while letting the screen turn off.
 
 <p align="center">

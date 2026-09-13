@@ -2,8 +2,8 @@
 
 A tiny SwiftUI menu bar app that keeps your Mac awake, including with the lid closed.
 
-Click the owl. Pick **3 hours**, **6 hours**, or **9 hours**. The owl turns amber.
-Click **Turn Off** to restore normal sleep early. At the deadline it turns off automatically.
+Click the owl. Pick **3 hours**, **Indefinitely**, or **9 hours**. The owl turns amber.
+Click **Turn Off** to restore normal sleep early. Timed sessions turn off automatically; Indefinitely runs until stopped, quit, or interrupted by the battery policy.
 While active, the menu shows the remaining time as **HH:MM left** above Turn Off.
 No Dock icon, settings window, accounts, dependencies, or network calls.
 
@@ -38,7 +38,7 @@ while the display can turn off normally. While a session is active, Owl reads th
 lid sensor and calls `pmset displaysleepnow` when the lid closes (within about two
 seconds), retrying every six seconds while closed if necessary. This sleeps all
 attached displays, not only the built-in screen. Opening the lid stops those requests.
-A small root-owned launch daemon accepts only 3/6/9-hour requests from the user who
+A small root-owned launch daemon accepts only 3-hour, 9-hour, or indefinite requests from the user who
 installed it; it does not grant passwordless sudo or execute commands from requests.
 The helper confirms success before the owl turns amber. Turn Off is confirmed within
 about two seconds. If the app crashes, the helper restores sleep within approximately

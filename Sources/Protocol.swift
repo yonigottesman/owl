@@ -2,7 +2,7 @@ import Foundation
 
 let owlRoot = "/var/run/com.yonigo.Owl"
 let owlLabel = "com.yonigo.Owl.helper"
-let owlHelperVersion = 5
+let owlHelperVersion = 6
 
 struct Request: Codable {
     let id: UUID
@@ -27,11 +27,11 @@ struct Status: Codable {
 // A session's deadline is established once. Heartbeats can never extend it.
 struct SessionGate {
     var id: UUID?
-    var deadline: TimeInterval = 0
+    var deadline: TimeInterval?
     var finished: UUID?
 
     mutating func wantsAwake(_ request: Request?, now: TimeInterval) -> Bool {
-        guard let r = request, [3, 6, 9].contains(r.hours),
+        guard let r = request, [0, 3, 9].contains(r.hours),
               r.heartbeat <= now + 5, now - r.heartbeat < 12 else {
             if let id { finished = id }
             id = nil
@@ -40,9 +40,10 @@ struct SessionGate {
         guard r.id != finished else { return false }
         if id != r.id {
             id = r.id
-            deadline = now + Double(r.hours * 3600)
+            // Zero means no time limit; heartbeat and stop rules still apply.
+            deadline = r.hours == 0 ? nil : now + Double(r.hours * 3600)
         }
-        if now >= deadline {
+        if let deadline, now >= deadline {
             finished = r.id
             id = nil
             return false
