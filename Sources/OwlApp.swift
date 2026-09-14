@@ -9,28 +9,172 @@ struct OwlApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            if model.active {
-                Text(model.remainingTime)
-                    .monospacedDigit()
-                Button("Turn Off") { model.stop() }.disabled(model.busy)
-            } else {
-                ForEach([3, 9, 0], id: \.self) { hours in
-                    Button(hours == 0 ? "∞" : "\(hours) hours") { model.start(hours: hours) }.disabled(model.busy)
-                }
-            }
-            Divider()
-            Toggle("Keep Awake on Battery", isOn: $model.keepAwakeOnBattery)
-            Toggle("Launch at Login", isOn: Binding(
-                get: { model.launchAtLogin },
-                set: { model.setLaunchAtLogin($0) }
-            ))
-            Button("Quit Owl") { NSApp.terminate(nil) }
-                .keyboardShortcut("q")
+            OwlPanel(model: model)
         } label: {
             Image(nsImage: OwlIcon.image(active: model.active))
                 .help(model.active ? "Owl — keeping Mac awake" : "Owl — normal sleep")
         }
-        .menuBarExtraStyle(.menu)
+        .menuBarExtraStyle(.window)
+    }
+}
+
+struct OwlPanel: View {
+    @ObservedObject var model: OwlModel
+    @State private var quitHovered = false
+    @AppStorage("durationPosition") private var durationPosition = 3.0
+    private let durations = [1, 3, 6, 9, 0]
+    private var selectedIndex: Int { min(4, max(0, Int(durationPosition.rounded()))) }
+    private var selectedHours: Int { durations[selectedIndex] }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if model.active {
+                Text(model.remainingTime)
+                    .font(.system(size: 24, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .padding(.top, 4)
+                Button("Turn Off") { model.stop() }
+                    .buttonStyle(SessionButtonStyle())
+                    .frame(maxWidth: .infinity)
+                    .disabled(model.busy)
+            } else {
+                VStack(spacing: 8) {
+                    HStack {
+                        Text("Keep awake").fontWeight(.medium)
+                        Spacer()
+                        Text(selectedHours == 0 ? "∞" : "\(selectedHours) \(selectedHours == 1 ? "hour" : "hours")")
+                            .foregroundStyle(.secondary)
+                    }
+                    Slider(value: $durationPosition, in: 0...4, step: 1)
+                        .accessibilityLabel("Keep awake duration")
+                        .accessibilityValue(selectedHours == 0 ? "Unlimited" : "\(selectedHours) hours")
+                    HStack(spacing: 0) {
+                        ForEach(Array(durations.enumerated()), id: \.offset) { index, hours in
+                            if index > 0 { Spacer(minLength: 0) }
+                            Text(hours == 0 ? "∞" : "\(hours)")
+                                .foregroundStyle(index == selectedIndex ? Color.primary : Color.secondary)
+                                .frame(width: 16)
+                        }
+                    }
+                    .font(.caption)
+                }
+                Button { model.start(hours: selectedHours) } label: {
+                    Text(model.busy ? "Starting…" : "Start")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(SessionButtonStyle())
+                .disabled(model.busy)
+            }
+            Divider()
+            Toggle(isOn: $model.keepAwakeOnBattery) {
+                Text("Keep Awake on Battery")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .toggleStyle(HoverRowToggleStyle())
+            Toggle(isOn: $model.sleepOnLowBattery) {
+                Text("Sleep at 10% Battery")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .toggleStyle(HoverRowToggleStyle())
+            Toggle(isOn: Binding(
+                get: { model.launchAtLogin },
+                set: { model.setLaunchAtLogin($0) }
+            )) {
+                Text("Launch at Login")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .toggleStyle(HoverRowToggleStyle())
+            Divider()
+            Button { NSApp.terminate(nil) } label: {
+                Text("Quit Owl")
+                    .foregroundStyle(quitHovered ? Color.primary : Color.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 8)
+                    .background {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.primary.opacity(quitHovered ? 0.10 : 0))
+                    }
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { quitHovered = $0 }
+            .keyboardShortcut("q")
+        }
+        .controlSize(.small)
+        .tint(.orange)
+        .padding(18)
+        .frame(width: 300)
+    }
+}
+
+private struct HoverRowToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HoverToggleRow(configuration: configuration)
+    }
+}
+
+private struct HoverToggleRow: View {
+    let configuration: ToggleStyle.Configuration
+    @State private var hovering = false
+
+    var body: some View {
+        Button { configuration.isOn.toggle() } label: {
+            HStack {
+                configuration.label
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Toggle("", isOn: .constant(configuration.isOn))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            .background {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.primary.opacity(hovering ? 0.10 : 0))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(configuration.isOn ? "On" : "Off")
+        .onHover { hovering = $0 }
+    }
+}
+
+private struct SessionButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        SessionButtonSurface(configuration: configuration)
+    }
+}
+
+private struct SessionButtonSurface: View {
+    let configuration: ButtonStyle.Configuration
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hovering = false
+
+    var body: some View {
+        configuration.label
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(.primary)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity)
+            .background {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.24 : (hovering && isEnabled ? 0.18 : 0.10)))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.primary.opacity(hovering && isEnabled ? 0.38 : 0.22), lineWidth: 1)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.98 : 1)
+            .opacity(isEnabled ? 1 : 0.5)
+            .onHover { hovering = $0 }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: hovering)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.08), value: configuration.isPressed)
     }
 }
 
@@ -40,6 +184,9 @@ final class OwlModel: ObservableObject {
     @Published var busy = false
     @Published var keepAwakeOnBattery = UserDefaults.standard.bool(forKey: "keepAwakeOnBattery") {
         didSet { UserDefaults.standard.set(keepAwakeOnBattery, forKey: "keepAwakeOnBattery") }
+    }
+    @Published var sleepOnLowBattery = UserDefaults.standard.object(forKey: "sleepOnLowBattery") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(sleepOnLowBattery, forKey: "sleepOnLowBattery") }
     }
     @Published private(set) var remainingTime = "00:00 left"
     @Published private(set) var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -130,7 +277,7 @@ final class OwlModel: ObservableObject {
                     guard helperReady else { throw OwlError.message("The helper did not start. Please try again.") }
                 }
                 let r = Request(id: UUID(), hours: hours, heartbeat: Date().timeIntervalSince1970, pid: getpid(),
-                                keepAwakeOnBattery: keepAwakeOnBattery)
+                                keepAwakeOnBattery: keepAwakeOnBattery, sleepOnLowBattery: sleepOnLowBattery)
                 try write(r)
                 request = r
                 pendingSince = Date().timeIntervalSince1970
@@ -160,7 +307,7 @@ final class OwlModel: ObservableObject {
         let now = Date().timeIntervalSince1970
         if let r = request {
             do { try write(Request(id: r.id, hours: r.hours, heartbeat: now, pid: r.pid,
-                                   keepAwakeOnBattery: keepAwakeOnBattery)) }
+                                   keepAwakeOnBattery: keepAwakeOnBattery, sleepOnLowBattery: sleepOnLowBattery)) }
             catch { request = nil; busy = false; showError("Owl lost contact with its helper. Sleep will be restored automatically.") }
         }
         guard let status = readStatus(), now - status.updated < 8 else {

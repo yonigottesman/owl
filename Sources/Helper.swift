@@ -56,7 +56,11 @@ enum Helper {
             let batteryMode = request?.keepAwakeOnBattery ?? false
             let sleepForClosedLid = PowerPolicy.endsSession(active: wanted, batteryMode: batteryMode,
                                                             onAC: onAC, lidClosed: lidClosed)
-            if sleepForClosedLid {
+            let sleepForLowBattery = PowerPolicy.sleepsForLowBattery(
+                active: wanted, enabled: request?.sleepOnLowBattery ?? false,
+                onAC: onAC, percentage: PowerPolicy.batteryPercentage())
+            let shouldSleep = sleepForClosedLid || sleepForLowBattery
+            if shouldSleep {
                 // Finish the session so stale heartbeats cannot restart it after wake.
                 wanted = gate.wantsAwake(nil, now: now)
             }
@@ -112,7 +116,7 @@ enum Helper {
                                 onACPower: onAC)
             try JSONEncoder().encode(status).write(to: URL(fileURLWithPath: owlRoot + "/status.json"), options: .atomic)
             chmod(owlRoot + "/status.json", 0o644)
-            if sleepForClosedLid && !sleepDisabled {
+            if shouldSleep && !sleepDisabled {
                 _ = run("/usr/bin/pmset", ["sleepnow"])
             }
             Thread.sleep(forTimeInterval: 2)

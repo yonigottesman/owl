@@ -2,7 +2,7 @@
 
 A tiny SwiftUI menu bar app that keeps your Mac awake, including with the lid closed.
 
-Click the owl. Pick **3 hours**, **9 hours**, or **∞**. The owl turns amber.
+Click the owl. Use the slider to pick **1**, **3**, **6**, **9 hours**, or **∞**, then click **Start**. The default is 9 hours; your last selection is remembered. The owl turns amber.
 Click **Turn Off** to restore normal sleep early. Timed sessions turn off automatically; Indefinitely runs until stopped, quit, or interrupted by the battery policy.
 While active, the menu shows the remaining time as **HH:MM left** above Turn Off.
 No Dock icon, settings window, accounts, dependencies, or network calls.
@@ -18,14 +18,16 @@ open Owl.app
 
 You can move Owl.app to Applications. The first time you select a duration, macOS
 asks for an administrator password to install Owl's helper. Later sessions are one click.
-**Keep Awake on Battery**, **Launch at Login**, and **Quit Owl** are always visible below the session actions.
+**Keep Awake on Battery**, **Sleep at 10% Battery**, **Launch at Login**, and **Quit Owl** are always visible below the session actions.
 Keep Awake on Battery is off by default and remembers your choice:
 - **Off:** keeps working with the lid closed while plugged in. On battery, keeps
   working with the lid open; closing the lid (or unplugging while closed) ends the
   session and puts the Mac to sleep.
 - **On:** keeps working even on battery with the lid closed.
 
-Changing the toggle applies to the current session without extending its timer.
+**Sleep at 10% Battery** is on by default. During an active session it puts the Mac to sleep at 10% or below when unplugged, even with the lid open or unlimited time selected. Plugged-in Macs are unaffected. Toggle rows highlight on hover and switch when clicked anywhere without dismissing the panel.
+
+Changing either battery toggle applies to the current session without extending its timer.
 Launch at Login uses macOS's login-item setting and is off by default. It opens Owl
 when you sign in; you still choose a duration to start keeping the Mac awake.
 Quit Owl exits the app and the helper restores normal sleep.
@@ -38,7 +40,7 @@ while the display can turn off normally. While a session is active, Owl reads th
 lid sensor and calls `pmset displaysleepnow` when the lid closes (within about two
 seconds), retrying every six seconds while closed if necessary. This sleeps all
 attached displays, not only the built-in screen. Opening the lid stops those requests.
-A small root-owned launch daemon accepts only 3-hour, 9-hour, or indefinite requests from the user who
+A small root-owned launch daemon accepts only 1-, 3-, 6-, 9-hour, or indefinite requests from the user who
 installed it; it does not grant passwordless sudo or execute commands from requests.
 The helper confirms success before the owl turns amber. Turn Off is confirmed within
 about two seconds. If the app crashes, the helper restores sleep within approximately

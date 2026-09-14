@@ -2,7 +2,7 @@ import Foundation
 
 let owlRoot = "/var/run/com.yonigo.Owl"
 let owlLabel = "com.yonigo.Owl.helper"
-let owlHelperVersion = 6
+let owlHelperVersion = 8
 
 struct Request: Codable {
     let id: UUID
@@ -10,6 +10,7 @@ struct Request: Codable {
     let heartbeat: TimeInterval
     let pid: Int32
     var keepAwakeOnBattery: Bool? = nil
+    var sleepOnLowBattery: Bool? = nil
 }
 
 struct Status: Codable {
@@ -31,7 +32,7 @@ struct SessionGate {
     var finished: UUID?
 
     mutating func wantsAwake(_ request: Request?, now: TimeInterval) -> Bool {
-        guard let r = request, [0, 3, 9].contains(r.hours),
+        guard let r = request, [0, 1, 3, 6, 9].contains(r.hours),
               r.heartbeat <= now + 5, now - r.heartbeat < 12 else {
             if let id { finished = id }
             id = nil

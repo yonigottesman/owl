@@ -19,9 +19,15 @@ enum SessionTests {
         assert(gate.deadline == 21800)
         assert(!gate.wantsAwake(request(3, 11000, next), now: 11012), "Lost heartbeat restores sleep")
         assert(!gate.wantsAwake(request(3, 11013, next), now: 11013), "Stale sessions cannot revive")
-        for hours in [-1, 1, 6, 12, Int.max] {
+        for hours in [-1, 2, 12, Int.max] {
             var invalid = SessionGate()
             assert(!invalid.wantsAwake(request(hours), now: 100))
+        }
+        for hours in [1, 3, 6, 9] {
+            var timed = SessionGate()
+            assert(timed.wantsAwake(request(hours), now: 100))
+            assert(timed.deadline == 100 + Double(hours * 3600))
+            assert(!timed.wantsAwake(request(hours, 100 + Double(hours * 3600)), now: 100 + Double(hours * 3600)))
         }
         var future = SessionGate()
         assert(!future.wantsAwake(request(3, 106), now: 100))
