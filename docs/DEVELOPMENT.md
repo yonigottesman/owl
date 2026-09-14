@@ -27,7 +27,7 @@ Keep Awake on Battery is off by default and remembers your choice:
 
 **Sleep at 10% Battery** is on by default. During an active session it puts the Mac to sleep at 10% or below when unplugged, even with the lid open or unlimited time selected. Plugged-in Macs are unaffected. Toggle rows highlight on hover and switch when clicked anywhere without dismissing the panel.
 
-Changing either battery toggle applies to the current session without extending its timer.
+Settings are captured once when Start is clicked. All toggles are disabled while a session is active or starting; stop the session to change them.
 Launch at Login uses macOS's login-item setting and is off by default. It opens Owl
 when you sign in; you still choose a duration to start keeping the Mac awake.
 Quit Owl exits the app and the helper restores normal sleep.
@@ -36,22 +36,26 @@ Quit Owl exits the app and the helper restores normal sleep.
 
 Owl uses `caffeinate -ims`, plus `pmset -a disablesleep 1` when plugged in or
 Keep Awake on Battery is enabled. The Mac stays awake
-while the display can turn off normally. While a session is active, Owl reads the
-lid sensor and calls `pmset displaysleepnow` when the lid closes (within about two
-seconds), retrying every six seconds while closed if necessary. This sleeps all
-attached displays, not only the built-in screen. Opening the lid stops those requests.
-A small root-owned launch daemon accepts only 1-, 3-, 6-, 9-hour, or indefinite requests from the user who
-installed it; it does not grant passwordless sudo or execute commands from requests.
-The helper confirms success before the owl turns amber. Turn Off is confirmed within
-about two seconds. If the app crashes, the helper restores sleep within approximately
-12 seconds. A root-owned marker enables restoration after helper crashes and reboots.
-The helper refuses to start if another tool already disabled sleep. Avoid running
-multiple sleep-control tools during an Owl session because pmset is a global setting.
-When a new app version needs an updated helper, selecting a duration prompts for
-administrator access again to install it.
+while the display can turn off normally. macOS notifications report power-source,
+battery, lid and display changes. Owl requests display sleep once when a session
+starts with the lid closed, the lid closes, or an external display is unplugged.
+It never sends display-sleep requests with an external display connected or when
+display detection is unavailable. There are no periodic display-sleep retries.
 
-The helper is installed for one Mac user at a time and polls every two seconds.
-It remains available while Owl is closed. Enable Launch at Login to open Owl automatically.
+The helper watches the request directory for start/stop events, watches the app's
+process for exit/crash, and schedules one expiry timer for timed sessions. Requests
+are immutable during a session. There is no heartbeat, recurring session timer,
+or periodic file/battery/lid polling. The app watches status-file changes; its
+countdown display refreshes once a minute without contacting the helper. A failed
+sleep-restoration command is the sole exception: cleanup retries until it succeeds.
+
+The helper is installed for one Mac user and accepts only 1-, 3-, 6-, 9-hour or
+indefinite requests. It never grants passwordless sudo or executes commands from
+requests. Quit or a detected app crash ends the session; a root-owned marker lets
+launchd restore sleep after helper crashes or reboots. Stale start requests are
+not replayed after recovery. The helper refuses to take over another tool's global
+sleep setting. Selecting Start installs an updated helper when needed.
+
 When `apple_secrets/owl-developer-id.cer` and `apple_secrets/owl-developer-id.key`
 are present, the build uses the new **Developer ID Application** certificate with
 hardened runtime and Apple's secure timestamp. The signing script requires a valid

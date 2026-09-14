@@ -29,10 +29,12 @@ struct OwlPanel: View {
     var body: some View {
         VStack(spacing: 16) {
             if model.active {
-                Text(model.remainingTime)
+                TimelineView(.periodic(from: .now, by: 60)) { _ in
+                    Text(model.remainingTime)
                     .font(.system(size: 24, weight: .medium, design: .rounded))
                     .monospacedDigit()
                     .padding(.top, 4)
+                }
                 Button("Turn Off") { model.stop() }
                     .buttonStyle(SessionButtonStyle())
                     .frame(maxWidth: .infinity)
@@ -71,11 +73,13 @@ struct OwlPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .toggleStyle(HoverRowToggleStyle())
+            .disabled(model.active || model.busy)
             Toggle(isOn: $model.sleepOnLowBattery) {
                 Text("Sleep at 10% Battery")
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .toggleStyle(HoverRowToggleStyle())
+            .disabled(model.active || model.busy)
             Toggle(isOn: Binding(
                 get: { model.launchAtLogin },
                 set: { model.setLaunchAtLogin($0) }
@@ -84,6 +88,7 @@ struct OwlPanel: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .toggleStyle(HoverRowToggleStyle())
+            .disabled(model.active || model.busy)
             Divider()
             Button { NSApp.terminate(nil) } label: {
                 Text("Quit Owl")
@@ -105,6 +110,39 @@ struct OwlPanel: View {
         .tint(.orange)
         .padding(18)
         .frame(width: 300)
+        .background(PanelFocusDismissal())
+        .onAppear { model.panelOpened() }
+    }
+}
+
+// MenuBarExtra windows can remain visible when Cmd+Tab activates another app.
+// Dismiss only the panel; the model and keep-awake session keep running.
+private struct PanelFocusDismissal: NSViewRepresentable {
+    func makeNSView(context: Context) -> FocusView { FocusView() }
+    func updateNSView(_ nsView: FocusView, context: Context) {}
+
+    final class FocusView: NSView {
+        private var activationObserver: NSObjectProtocol?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
+                forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main
+            ) { [weak self] notification in
+                guard let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
+                      app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+                self?.window?.orderOut(nil)
+            }
+        }
+
+        convenience init() { self.init(frame: .zero) }
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+        deinit {
+            if let activationObserver {
+                NSWorkspace.shared.notificationCenter.removeObserver(activationObserver)
+            }
+        }
     }
 }
 
@@ -116,6 +154,7 @@ private struct HoverRowToggleStyle: ToggleStyle {
 
 private struct HoverToggleRow: View {
     let configuration: ToggleStyle.Configuration
+    @Environment(\.isEnabled) private var isEnabled
     @State private var hovering = false
 
     var body: some View {
@@ -133,11 +172,12 @@ private struct HoverToggleRow: View {
             .padding(.vertical, 6)
             .background {
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color.primary.opacity(hovering ? 0.10 : 0))
+                    .fill(Color.primary.opacity(hovering && isEnabled ? 0.10 : 0))
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .opacity(isEnabled ? 1 : 0.5)
         .accessibilityValue(configuration.isOn ? "On" : "Off")
         .onHover { hovering = $0 }
     }
@@ -188,13 +228,22 @@ final class OwlModel: ObservableObject {
     @Published var sleepOnLowBattery = UserDefaults.standard.object(forKey: "sleepOnLowBattery") as? Bool ?? true {
         didSet { UserDefaults.standard.set(sleepOnLowBattery, forKey: "sleepOnLowBattery") }
     }
-    @Published private(set) var remainingTime = "00:00 left"
+    @Published private(set) var deadline: TimeInterval?
+    var remainingTime: String {
+        guard active else { return "00:00 left" }
+        guard let deadline else { return "Until turned off" }
+        let minutes = Int(ceil(min(9 * 3600, max(0, deadline - Date().timeIntervalSince1970)) / 60))
+        return String(format: "%02d:%02d left", minutes / 60, minutes % 60)
+    }
     @Published private(set) var launchAtLogin = SMAppService.mainApp.status == .enabled
     private var request: Request?
-    private var timer: Timer?
+    private var statusEvents: FileEvents?
+    private var helperExit: DispatchSourceProcess?
+    private var helperPID: Int32?
+    private var confirmationTimeout: DispatchWorkItem?
+    private var confirmationPending = false
     private var lastError: String?
     private var lockFD: Int32 = -1
-    private var pendingSince: TimeInterval?
 
     init() {
         NSApp.setActivationPolicy(.accessory)
@@ -202,23 +251,18 @@ final class OwlModel: ObservableObject {
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         lockFD = open(directory.appendingPathComponent("instance.lock").path, O_CREAT | O_RDWR, 0o600)
         guard lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) == 0 else { exit(0) }
-        let heartbeatTimer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
-        }
-        // Keep the countdown and helper heartbeat running while the menu is open.
-        RunLoop.main.add(heartbeatTimer, forMode: .common)
-        timer = heartbeatTimer
         NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
             // The helper also restores sleep if this process is force-quit.
             try? FileManager.default.removeItem(atPath: owlRoot + "/requests/request.json")
         }
-        tick()
+        observeStatus()
+        refreshStatus()
     }
 
     private var helperReady: Bool {
         guard let status = readStatus() else { return false }
         return status.helperVersion == owlHelperVersion &&
-            Date().timeIntervalSince1970 - status.updated < 8 &&
+            status.helperPID.map { kill($0, 0) == 0 || errno == EPERM } == true &&
             FileManager.default.isWritableFile(atPath: owlRoot + "/requests")
     }
 
@@ -244,7 +288,7 @@ final class OwlModel: ObservableObject {
     }
 
     func start(hours: Int) {
-        guard !busy else { return }
+        guard !busy, !active else { return }
         busy = true
         Task {
             do {
@@ -270,19 +314,24 @@ final class OwlModel: ObservableObject {
                         if !result.1.contains("-128") { showError("Helper setup failed. " + result.1) }
                         return
                     }
-                    for _ in 0..<30 {
-                        if helperReady { break }
-                        try await Task.sleep(for: .milliseconds(200))
-                    }
+                    observeStatus()
+                    await waitForHelper()
                     guard helperReady else { throw OwlError.message("The helper did not start. Please try again.") }
                 }
-                let r = Request(id: UUID(), hours: hours, heartbeat: Date().timeIntervalSince1970, pid: getpid(),
+                let r = Request(id: UUID(), hours: hours, pid: getpid(),
                                 keepAwakeOnBattery: keepAwakeOnBattery, sleepOnLowBattery: sleepOnLowBattery)
-                try write(r)
+                observeStatus()
                 request = r
-                pendingSince = Date().timeIntervalSince1970
+                armConfirmationTimeout()
+                try write(r)
                 lastError = nil
-            } catch { busy = false; showError(error.localizedDescription) }
+            } catch {
+                confirmationTimeout?.cancel()
+                confirmationPending = false
+                request = nil
+                busy = false
+                showError(error.localizedDescription)
+            }
         }
     }
 
@@ -292,7 +341,8 @@ final class OwlModel: ObservableObject {
             if FileManager.default.fileExists(atPath: path) { try FileManager.default.removeItem(atPath: path) }
             request = nil
             busy = true
-            pendingSince = Date().timeIntervalSince1970
+            armConfirmationTimeout()
+            refreshStatus()
         } catch { showError(error.localizedDescription) }
     }
 
@@ -300,43 +350,95 @@ final class OwlModel: ObservableObject {
         try JSONEncoder().encode(r).write(to: URL(fileURLWithPath: owlRoot + "/requests/request.json"), options: .atomic)
     }
 
-    private func tick() {
-        // Reflect changes made outside Owl in System Settings as well.
-        let loginEnabled = SMAppService.mainApp.status == .enabled
-        if launchAtLogin != loginEnabled { launchAtLogin = loginEnabled }
-        let now = Date().timeIntervalSince1970
-        if let r = request {
-            do { try write(Request(id: r.id, hours: r.hours, heartbeat: now, pid: r.pid,
-                                   keepAwakeOnBattery: keepAwakeOnBattery, sleepOnLowBattery: sleepOnLowBattery)) }
-            catch { request = nil; busy = false; showError("Owl lost contact with its helper. Sleep will be restored automatically.") }
+    func panelOpened() { refreshStatus() }
+
+    private func observeStatus() {
+        statusEvents = FileEvents(directory: owlRoot) { [weak self] in
+            Task { @MainActor in self?.refreshStatus() }
         }
-        guard let status = readStatus(), now - status.updated < 8 else {
-            if active { showError("Owl's helper is restarting. Waiting for sleep status.") }
-            if let since = pendingSince, now - since > 12 { busy = false; pendingSince = nil; request = nil }
-            return
+    }
+
+    private func waitForHelper() async {
+        if helperReady { return }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            var watcher: FileEvents?
+            var timeout: DispatchWorkItem?
+            var finished = false
+            let finish: () -> Void = {
+                guard !finished else { return }
+                finished = true
+                watcher = nil
+                timeout?.cancel()
+                continuation.resume()
+            }
+            watcher = FileEvents(directory: owlRoot) { [weak self] in
+                Task { @MainActor in
+                    if self?.helperReady == true { finish() }
+                }
+            }
+            let work = DispatchWorkItem { finish() }
+            timeout = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
+            if helperReady { finish() }
+            _ = watcher
+        }
+    }
+
+    private func armConfirmationTimeout() {
+        confirmationPending = true
+        confirmationTimeout?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.busy else { return }
+            // Remove an unconfirmed start so it cannot become active later.
+            try? FileManager.default.removeItem(atPath: owlRoot + "/requests/request.json")
+            self.request = nil
+            self.confirmationPending = false
+            self.busy = false
+            self.showError("The helper did not confirm the change. Please try again.")
+        }
+        confirmationTimeout = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
+    }
+
+    private func refreshStatus() {
+        launchAtLogin = SMAppService.mainApp.status == .enabled
+        guard let status = readStatus() else { return }
+        if helperPID != status.helperPID {
+            helperExit?.cancel()
+            helperExit = nil
+            helperPID = status.helperPID
+            if let pid = status.helperPID {
+                let source = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .main)
+                source.setEventHandler { [weak self] in
+                    Task { @MainActor in
+                        guard let self, self.helperPID == pid else { return }
+                        self.request = nil
+                        self.confirmationTimeout?.cancel()
+                        self.busy = false
+                        // Keep the last confirmed state until launchd's recovery reports normal sleep.
+                        if self.active { self.showError("Owl's helper is restarting and restoring normal sleep.") }
+                    }
+                }
+                source.resume()
+                helperExit = source
+            }
         }
         active = status.active
-        if let deadline = status.deadline, deadline.isFinite {
-            // Round up so a freshly started three-hour session reads 03:00.
-            let minutes = Int(ceil(min(9 * 3600, max(0, deadline - now)) / 60))
-            let label = String(format: "%02d:%02d left", minutes / 60, minutes % 60)
-            if remainingTime != label { remainingTime = label }
-        } else if status.active {
-            remainingTime = "Until turned off"
-        } else if remainingTime != "00:00 left" {
-            remainingTime = "00:00 left"
+        deadline = status.deadline
+        if let message = status.error {
+            request = nil; busy = false
+            confirmationTimeout?.cancel()
+            showError(message)
         }
-        if let message = status.error { request = nil; busy = false; pendingSince = nil; showError(message) }
         if let r = request, status.id == r.id {
-            busy = false; pendingSince = nil
+            busy = false
+            confirmationTimeout?.cancel()
             if !status.active { request = nil }
-        } else if request == nil && !status.active && pendingSince != nil {
-            busy = false; pendingSince = nil
+        } else if request == nil && !status.active && confirmationPending {
+            busy = false
+            confirmationTimeout?.cancel()
         }
-        if let since = pendingSince, now - since > 12 {
-            request = nil; busy = false; pendingSince = nil
-            showError("The helper did not confirm the change. Please try again.")
-        }
+        if !busy { confirmationPending = false }
     }
 
     private func showError(_ message: String) {

@@ -10,5 +10,9 @@ xcrun swiftc Sources/LidDisplay.swift Tests/LidDisplayTests.swift -o .build/lid-
 .build/lid-display-tests
 xcrun swiftc Sources/PowerPolicy.swift Tests/PowerPolicyTests.swift -o .build/power-policy-tests
 .build/power-policy-tests
+xcrun swiftc Sources/EventSources.swift Tests/EventTests.swift -o .build/event-tests
+.build/event-tests
+xcrun swiftc -import-objc-header Sources/PowerMessages.h Sources/PowerEvents.swift Tests/PowerEventRegistrationTests.swift -o .build/power-events-tests
+.build/power-events-tests
 /bin/bash -n Resources/install-helper.sh scripts/uninstall.sh build.sh
 /usr/bin/plutil -lint Resources/Info.plist

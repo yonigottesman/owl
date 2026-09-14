@@ -2,12 +2,11 @@ import Foundation
 
 let owlRoot = "/var/run/com.yonigo.Owl"
 let owlLabel = "com.yonigo.Owl.helper"
-let owlHelperVersion = 8
+let owlHelperVersion = 10
 
 struct Request: Codable {
     let id: UUID
     let hours: Int
-    let heartbeat: TimeInterval
     let pid: Int32
     var keepAwakeOnBattery: Bool? = nil
     var sleepOnLowBattery: Bool? = nil
@@ -22,31 +21,35 @@ struct Status: Codable {
     var updated: TimeInterval = Date().timeIntervalSince1970
     var lidClosed: Bool?
     var displaySleepRequestedAt: TimeInterval?
+    var helperPID: Int32?
     var onACPower: Bool?
 }
 
-// A session's deadline is established once. Heartbeats can never extend it.
+// The start request is an immutable snapshot. Events may end it, never change it.
 struct SessionGate {
-    var id: UUID?
-    var deadline: TimeInterval?
+    private(set) var session: Request?
+    var id: UUID? { session?.id }
+    private(set) var deadline: TimeInterval?
     var finished: UUID?
 
+    mutating func stop() {
+        if let session { finished = session.id }
+        session = nil
+        deadline = nil
+    }
+
     mutating func wantsAwake(_ request: Request?, now: TimeInterval) -> Bool {
-        guard let r = request, [0, 1, 3, 6, 9].contains(r.hours),
-              r.heartbeat <= now + 5, now - r.heartbeat < 12 else {
-            if let id { finished = id }
-            id = nil
+        guard let r = request, [0, 1, 3, 6, 9].contains(r.hours), r.pid > 0 else {
+            stop()
             return false
         }
         guard r.id != finished else { return false }
-        if id != r.id {
-            id = r.id
-            // Zero means no time limit; heartbeat and stop rules still apply.
+        if session == nil {
+            session = r
             deadline = r.hours == 0 ? nil : now + Double(r.hours * 3600)
         }
         if let deadline, now >= deadline {
-            finished = r.id
-            id = nil
+            stop()
             return false
         }
         return true
