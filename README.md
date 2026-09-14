@@ -14,6 +14,6 @@ Unlike `caffeinate` alone, Owl uses a privileged helper to keep working with the
 <p align="center">macOS 13+ · Apple silicon · Administrator password required on first use</p>
 
 <p align="center">
-  <img src="docs/owl-before.png" width="780" alt="Owl before starting: duration slider with 1, 3, 6, 9 hours, or unlimited time, and battery switches">
-  <img src="docs/owl-after.png" width="780" alt="Owl keeping the Mac awake: amber owl, remaining time, and Turn Off">
+  <img src="docs/owl-before-1.3.png" width="780" alt="Owl before starting: duration slider with 1, 3, 6, 9 hours, or unlimited time, and battery switches">
+  <img src="docs/owl-after-1.3.png" width="780" alt="Owl keeping the Mac awake: amber owl, remaining time, and Turn Off">
 </p>
